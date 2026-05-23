@@ -3,7 +3,7 @@ defmodule EcorecycleApiWeb.AnalyzeController do
 
   def analyze(conn, %{"file" => %Plug.Upload{path: path}}) do
   case HTTPoison.post(
-         "https://ecorecycle-inferencia-api.onrender.com/analyze",
+         "https://cesarandre13-ecorecycle-yolo.hf.space/analyze",
          {:multipart, [{:file, path}]}
        ) do
 
