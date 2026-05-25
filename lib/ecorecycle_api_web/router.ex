@@ -58,6 +58,10 @@ get "admin/reporte-bloques", AdminController, :reporte_bloques
 get "admin/evolucion-material", AdminController, :evolucion_material
 
 get "admin/entregas-transportador", AdminController, :entregas_transportador
+
+get "user/notificaciones_campanas", UserController, :notificaciones_campanas
+
+
 end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development

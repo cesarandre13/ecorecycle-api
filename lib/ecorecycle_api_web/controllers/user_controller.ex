@@ -856,4 +856,59 @@ def categorias_reciclaje(conn, _params) do
   })
 end
 
+def notificaciones_campanas(conn, params) do
+
+  historial =
+    Map.get(params, "historial", "false")
+
+  limite =
+    if historial == "true" do
+      ""
+    else
+      "TOP 5"
+    end
+
+  {:ok, result} =
+    Repo.query("""
+    SELECT
+      #{limite}
+
+      NombreCampania,
+      FechaInicio,
+      FechaFin,
+      MaterialObjetivo,
+      Incentivo,
+      FechaRegistro
+
+    FROM Campanias
+
+    ORDER BY FechaRegistro DESC
+    """)
+
+  rows =
+    Enum.map(result.rows, fn row ->
+
+      %{
+        nombre: Enum.at(row, 0),
+
+        fecha_inicio: Enum.at(row, 1),
+
+        fecha_fin: Enum.at(row, 2),
+
+        material: Enum.at(row, 3),
+
+        incentivo: Enum.at(row, 4),
+
+        fecha_registro: Enum.at(row, 5)
+      }
+
+    end)
+
+  json(conn, %{
+    success: true,
+    campanias: rows
+  })
+
+end
+
 end
