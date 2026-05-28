@@ -878,7 +878,8 @@ def notificaciones_campanas(conn, params) do
       FechaFin,
       MaterialObjetivo,
       Incentivo,
-      FechaRegistro
+      FechaRegistro,
+      Estado
 
     FROM Campanias
 
@@ -899,7 +900,9 @@ def notificaciones_campanas(conn, params) do
 
         incentivo: Enum.at(row, 4),
 
-        fecha_registro: Enum.at(row, 5)
+        fecha_registro: Enum.at(row, 5),
+
+        estado: Enum.at(row, 6)
       }
 
     end)

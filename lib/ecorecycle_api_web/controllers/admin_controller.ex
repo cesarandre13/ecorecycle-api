@@ -77,14 +77,41 @@ alias Ecto.Adapters.SQL
   })
   end
 
+  def enviar_push(token, titulo, mensaje) do
+  server_key = "TU_SERVER_KEY"
+
+  headers = [
+    {"Content-Type", "application/json"},
+    {"Authorization", "key=#{server_key}"}
+  ]
+
+  body =
+    Jason.encode!(%{
+      to: token,
+      notification: %{
+        title: titulo,
+        body: mensaje
+      },
+      priority: "high"
+    })
+
+  HTTPoison.post(
+    "https://fcm.googleapis.com/fcm/send",
+    body,
+    headers
+  )
+end
+
 # ====================================
-  # APROBAR
-  # ====================================
-  def aprobar(conn, %{"id" => id}) do
+# APROBAR
+# ====================================
+
+def aprobar(conn, %{"id" => id}) do
 
   # =============================
   # OBTENER SOLICITUD
   # =============================
+
   {:ok, solicitud} =
     Repo.query("""
     SELECT *
@@ -92,19 +119,26 @@ alias Ecto.Adapters.SQL
     WHERE Id = @1
     """, [id])
 
-  solicitudRow = List.first(solicitud.rows)
+  solicitudRow =
+    List.first(solicitud.rows)
 
-  usuarioId = Enum.at(solicitudRow, 1)
+  usuarioId =
+    Enum.at(solicitudRow, 1)
+
+  codigo =
+    Enum.at(solicitudRow, 2)
 
   # ==========================================
   # PESO TOTAL
   # ==========================================
+
   peso_total =
     Enum.at(solicitudRow, 5) || 0
 
   # =============================
   # OBTENER DETALLES
   # =============================
+
   {:ok, detalles} =
     Repo.query("""
     SELECT TipoReciclaje, Categoria, Cantidad
@@ -115,6 +149,7 @@ alias Ecto.Adapters.SQL
   # ==========================================
   # OBTENER TIPO MATERIAL
   # ==========================================
+
   tipo_material =
     detalles.rows
     |> List.first()
@@ -123,56 +158,65 @@ alias Ecto.Adapters.SQL
   # =============================
   # CALCULAR PUNTOS + CO2
   # =============================
+
   {puntosFinal, co2Final} =
-    Enum.reduce(detalles.rows, {0, 0}, fn row, {accPuntos, accCo2} ->
+    Enum.reduce(
+      detalles.rows,
+      {0, 0},
+      fn row, {accPuntos, accCo2} ->
 
-      tipo = Enum.at(row, 0)
+        tipo =
+          Enum.at(row, 0)
 
-      cantidad = Enum.at(row, 2)
+        cantidad =
+          Enum.at(row, 2)
 
-      {:ok, config} =
-        Repo.query("""
-        SELECT PuntosPorUnidad, Co2PorUnidad
-        FROM ConfiguracionReciclaje
-        WHERE TipoReciclaje = @1
-        """, [tipo])
+        {:ok, config} =
+          Repo.query("""
+          SELECT PuntosPorUnidad, Co2PorUnidad
+          FROM ConfiguracionReciclaje
+          WHERE TipoReciclaje = @1
+          """, [tipo])
 
-      if length(config.rows) > 0 do
+        if length(config.rows) > 0 do
 
-        configRow = List.first(config.rows)
+          configRow =
+            List.first(config.rows)
 
-        puntosUnidad =
-          Enum.at(configRow, 0) || 0
+          puntosUnidad =
+            Enum.at(configRow, 0) || 0
 
-        co2Unidad =
-          Enum.at(configRow, 1) || 0
+          co2Unidad =
+            Enum.at(configRow, 1) || 0
 
-        puntos =
-          puntosUnidad * cantidad
+          puntos =
+            puntosUnidad * cantidad
 
-        co2 =
-          co2Unidad * cantidad
+          co2 =
+            co2Unidad * cantidad
 
-        {
-          accPuntos + puntos,
-          accCo2 + co2
-        }
+          {
+            accPuntos + puntos,
+            accCo2 + co2
+          }
 
-      else
+        else
 
-        {
-          accPuntos,
-          accCo2
-        }
+          {
+            accPuntos,
+            accCo2
+          }
 
+        end
       end
-    end)
+    )
 
   # =============================
   # ACTUALIZAR USER
   # =============================
+
   Repo.query("""
-  UPDATE users
+  UPDATE Users
   SET
     eco_points = ISNULL(eco_points, 0) + @1,
     co2_saved = ISNULL(co2_saved, 0) + @2
@@ -186,6 +230,7 @@ alias Ecto.Adapters.SQL
   # =============================
   # APROBAR SOLICITUD
   # =============================
+
   Repo.query("""
   UPDATE SolicitudReciclaje
   SET Estado = 'aprobado'
@@ -195,6 +240,7 @@ alias Ecto.Adapters.SQL
   # ==========================================
   # ACTUALIZAR CONTENEDOR
   # ==========================================
+
   Repo.query("""
   UPDATE ContenedorReciclaje
   SET PesoActual = ISNULL(PesoActual, 0) + @1
@@ -206,6 +252,7 @@ alias Ecto.Adapters.SQL
   # ==========================================
   # VALIDAR CAPACIDAD
   # ==========================================
+
   Repo.query("""
   UPDATE ContenedorReciclaje
   SET Estado =
@@ -215,22 +262,101 @@ alias Ecto.Adapters.SQL
       ELSE 'activo'
     END
   WHERE Id = 1
-  """, [
-    tipo_material
-  ])
+  """)
+
+  # ======================================
+  # OBTENER TOKEN USER
+  # ======================================
+
+  token_query = """
+  SELECT FirebaseToken
+  FROM Users
+  WHERE id = @1
+  """
+
+  {:ok, token_result} =
+    Ecto.Adapters.SQL.query(
+      Repo,
+      token_query,
+      [usuarioId]
+    )
+
+  token =
+    if length(token_result.rows) > 0 do
+      token_result.rows
+      |> List.first()
+      |> List.first()
+    else
+      nil
+    end
+
+  # ======================================
+  # MENSAJE
+  # ======================================
+
+  titulo =
+    "Entrega Confirmada"
+
+  mensaje =
+    "Tu entrega #{codigo} fue confirmada. Se acreditan #{puntosFinal} Ecopuntos a tu cuenta"
+
+  # ======================================
+  # GUARDAR NOTIFICACION
+  # ======================================
+
+  insert_notificacion = """
+  INSERT INTO Notificaciones
+  (
+    UserId,
+    Titulo,
+    Mensaje,
+    Leido,
+    Fecha
+  )
+  VALUES
+  (
+    @1,
+    @2,
+    @3,
+    0,
+    GETDATE()
+  )
+  """
+
+  Ecto.Adapters.SQL.query!(
+    Repo,
+    insert_notificacion,
+    [
+      usuarioId,
+      titulo,
+      mensaje
+    ]
+  )
+
+  # ======================================
+  # ENVIAR PUSH
+  # ======================================
+
+  if token != nil do
+    enviar_push(
+      token,
+      titulo,
+      mensaje
+    )
+  end
 
   json(conn, %{
     success: true,
     puntos: puntosFinal,
     co2: co2Final
   })
-
 end
 
-  # ====================================
-  # RECHAZAR
-  # ====================================
-  def rechazar(conn, %{"id" => id}) do
+# ====================================
+# RECHAZAR
+# ====================================
+
+def rechazar(conn, %{"id" => id}) do
 
   Repo.query("""
   UPDATE SolicitudReciclaje

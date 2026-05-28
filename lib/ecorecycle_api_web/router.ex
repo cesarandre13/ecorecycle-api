@@ -61,6 +61,17 @@ get "admin/entregas-transportador", AdminController, :entregas_transportador
 
 get "user/notificaciones_campanas", UserController, :notificaciones_campanas
 
+post "pickup/confirmar_recojo/:codigo", RecyclingController, :confirmar_recojo
+
+get "pickup/recojos_asignados", RecyclingController, :recojos_asignados
+
+get "/eco/incentivos", RecyclingController, :listar_incentivos
+
+post "/eco/canjear", RecyclingController,  :canjear_incentivo
+
+get "/admin/ranking_bloques", RecyclingController, :ranking_bloques
+
+post "/guardar-token", RecyclingController, :guardar_token
 
 end
 

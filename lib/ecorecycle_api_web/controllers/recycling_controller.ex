@@ -492,4 +492,457 @@ GROUP BY
 
   end
 
+
+  # =========================================
+  # LISTA
+  # =========================================
+  def recojos_asignados(conn, _params) do
+
+  query = """
+
+  SELECT
+
+      sr.Codigo,
+
+      sr.Transportista,
+
+      cr.TipoMaterial,
+
+      sr.PesoTotal,
+
+      sr.FechaRecojo,
+
+      sr.Horario,
+
+      sr.Estado
+
+  FROM SolicitudRecojo sr
+
+  INNER JOIN ContenedorReciclaje cr
+      ON cr.Id = sr.ContenedorId
+
+  WHERE sr.Estado = 'pendiente'
+
+  ORDER BY sr.FechaRecojo ASC
+
+  """
+
+  case Ecto.Adapters.SQL.query(
+    Repo,
+    query,
+    []
+  ) do
+
+    {:ok, result} ->
+
+      data =
+
+        Enum.map(
+          result.rows,
+          fn row ->
+
+            %{
+
+              codigo:
+                Enum.at(row, 0),
+
+              transportista:
+                Enum.at(row, 1),
+
+              material:
+                Enum.at(row, 2),
+
+              peso_total:
+                Enum.at(row, 3),
+
+              fecha_recojo:
+                Enum.at(row, 4),
+
+              horario:
+                Enum.at(row, 5),
+
+              estado:
+                Enum.at(row, 6),
+            }
+          end
+        )
+
+      json(conn, data)
+
+    {:error, error} ->
+
+      json(conn, %{
+        error:
+          inspect(error)
+      })
+  end
+end
+
+  # =========================================
+  # CONFIRMAR
+  # =========================================
+  def confirmar_recojo(conn, %{"codigo" => codigo}) do
+
+    {:ok, _} =
+      Repo.query("""
+
+      UPDATE SolicitudRecojo
+
+      SET
+        Estado = 'recolectado',
+        FechaRecojoReal = GETDATE()
+
+      WHERE Codigo = @1
+
+      """, [codigo])
+
+    json(conn, %{
+      success: true
+    })
+  end
+
+def listar_incentivos(conn, params) do
+
+  usuario_id =
+    Map.get(params, "usuario_id")
+
+  query = """
+
+  SELECT
+
+      i.Id,
+      i.Nombre,
+      i.Descripcion,
+      i.EcoPuntosRequeridos,
+
+      u.eco_points
+
+  FROM Incentivo i
+
+  CROSS JOIN Users u
+
+  WHERE
+      i.Estado = 'activo'
+      AND u.Id = @1
+
+  """
+
+  case Ecto.Adapters.SQL.query(
+    Repo,
+    query,
+    [usuario_id]
+  ) do
+
+    {:ok, result} ->
+
+      data =
+
+        Enum.map(
+          result.rows,
+          fn row ->
+
+            puntos_usuario =
+              Enum.at(row, 4)
+
+            puntos_requeridos =
+              Enum.at(row, 3)
+
+            habilitado =
+              puntos_usuario >= puntos_requeridos
+
+            faltantes =
+              puntos_requeridos - puntos_usuario
+
+            %{
+
+              id:
+                Enum.at(row, 0),
+
+                nombre:
+                  Enum.at(row, 1)
+                  |> :unicode.characters_to_binary(:latin1, :utf8),
+
+                descripcion:
+                  Enum.at(row, 2)
+                  |> :unicode.characters_to_binary(:latin1, :utf8),
+
+              ecopuntos_requeridos:
+                puntos_requeridos,
+
+              ecopuntos_usuario:
+                puntos_usuario,
+
+              habilitado:
+                habilitado,
+
+              faltantes:
+                if(
+                  habilitado,
+                  do: 0,
+                  else: faltantes
+                )
+            }
+          end
+        )
+
+      json(conn, data)
+
+    {:error, error} ->
+
+      json(conn, %{
+        error: inspect(error)
+      })
+  end
+end
+
+def canjear_incentivo(conn, params) do
+
+  usuario_id =
+    params["usuario_id"]
+
+  incentivo_id =
+    params["incentivo_id"]
+
+  query = """
+
+  SELECT
+
+      EcoPuntosRequeridos
+
+  FROM Incentivo
+
+  WHERE Id = @1
+
+  """
+
+  {:ok, result} =
+    Ecto.Adapters.SQL.query(
+      Repo,
+      query,
+      [incentivo_id]
+    )
+
+  puntos =
+    result.rows
+    |> List.first()
+    |> List.first()
+
+  query_user = """
+
+  SELECT eco_points
+
+  FROM Users
+
+  WHERE Id = @1
+
+  """
+
+  {:ok, user_result} =
+    Ecto.Adapters.SQL.query(
+      Repo,
+      query_user,
+      [usuario_id]
+    )
+
+  eco_points =
+    user_result.rows
+    |> List.first()
+    |> List.first()
+
+  if eco_points < puntos do
+
+    json(conn, %{
+      success: false,
+      message: "Puntos insuficientes"
+    })
+
+  else
+
+    descuento_query = """
+
+    UPDATE Users
+
+    SET eco_points = eco_points - @1
+
+    WHERE Id = @2
+
+    """
+
+    Ecto.Adapters.SQL.query(
+      Repo,
+      descuento_query,
+      [puntos, usuario_id]
+    )
+
+    insert_query = """
+
+    INSERT INTO Canje
+    (
+      UsuarioId,
+      IncentivoId,
+      EcoPuntosUsados,
+      Estado
+    )
+
+    OUTPUT INSERTED.Id
+
+    VALUES
+    (
+      @1,
+      @2,
+      @3,
+      'realizado'
+    )
+
+    """
+
+    {:ok, insert_result} =
+      Ecto.Adapters.SQL.query(
+        Repo,
+        insert_query,
+        [
+          usuario_id,
+          incentivo_id,
+          puntos
+        ]
+      )
+
+    canje_id =
+      insert_result.rows
+      |> List.first()
+      |> List.first()
+
+    # ============================================
+# GENERAR CODIGO
+# ============================================
+
+fecha =
+  Date.utc_today()
+  |> Date.to_string()
+  |> String.replace("-", "")
+
+codigo =
+  "CANJE-#{fecha}-#{canje_id}"
+
+    update_query = """
+
+    UPDATE Canje
+
+    SET CodigoCanje = @1
+
+    WHERE Id = @2
+
+    """
+
+    Ecto.Adapters.SQL.query(
+      Repo,
+      update_query,
+      [codigo, canje_id]
+    )
+
+    json(conn, %{
+      success: true,
+      codigo: codigo
+    })
+  end
+end
+
+# =========================================================
+# RANKING BLOQUES
+# =========================================================
+
+def ranking_bloques(conn, params) do
+  fecha_inicio = params["fecha_inicio"]
+  fecha_fin = params["fecha_fin"]
+
+  query = """
+SELECT
+    BM.Name AS bloque,
+
+    SUM(ISNULL(SRD.Puntos, 0)) AS ecopuntos,
+
+    SUM(ISNULL(SR.PesoTotal, 0)) AS peso_reciclado,
+
+    SUM(ISNULL(SR.ValorTotal, 0)) AS valor_economico,
+
+    COUNT(SR.Id) AS entregas,
+
+    MAX(NE.NombreNivel) AS nivel_promedio
+
+FROM SolicitudReciclaje SR
+
+INNER JOIN SolicitudReciclajeDetalle SRD
+    ON SRD.SolicitudId = SR.Id
+
+INNER JOIN Users U
+    ON U.id = SR.UsuarioId
+
+INNER JOIN NivelesEco NE
+    ON U.eco_points BETWEEN NE.PuntosMinimos AND NE.PuntosMaximos
+
+INNER JOIN UnitManagement UM
+    ON UM.IdUnitManagement = U.UnitManagement
+
+INNER JOIN BlockManagement BM
+    ON BM.IdBlockManager = UM.IdBlockManager
+
+WHERE
+    SR.Estado = 'aprobado'
+    AND CAST(SR.FechaRegistro AS DATE)
+        BETWEEN @1 AND @2
+
+GROUP BY BM.Name
+
+ORDER BY ecopuntos DESC
+"""
+
+  {:ok, result} =
+    Ecto.Adapters.SQL.query(
+      Repo,
+      query,
+      [fecha_inicio, fecha_fin]
+    )
+
+rows =
+  result.rows
+  |> Enum.with_index(1)
+  |> Enum.map(fn {row, index} ->
+    %{
+      posicion: index,
+      bloque: Enum.at(row, 0),
+      ecopuntos: Enum.at(row, 1),
+      peso_reciclado: Enum.at(row, 2),
+      valor_economico: Enum.at(row, 3),
+      entregas: Enum.at(row, 4),
+      nivel_promedio: Enum.at(row, 5)
+    }
+  end)
+
+  json(conn, rows)
+end
+
+def guardar_token(conn, params) do
+  user_id = params["user_id"]
+  token = params["token"]
+
+  query = """
+  UPDATE Users
+  SET FirebaseToken = @1
+  WHERE id = @2
+  """
+
+  Ecto.Adapters.SQL.query!(
+    Repo,
+    query,
+    [token, user_id]
+  )
+
+  json(conn, %{
+    success: true
+  })
+end
+
+
+
+
 end
