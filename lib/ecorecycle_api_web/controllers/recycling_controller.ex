@@ -338,21 +338,36 @@ defmodule EcorecycleApiWeb.RecyclingController do
       Repo,
       """
       SELECT
-        U.name,
-        U.email,
-        U.eco_points,
-        U.co2_saved,
-        U.UnitManagement,
-        NE.NombreNivel,
-        NE.Id
-
-      FROM users U
-
-      LEFT JOIN NivelesEco NE
-        ON U.eco_points BETWEEN NE.PuntosMinimos
-        AND NE.PuntosMaximos
-
-      WHERE U.id = @1
+            U.name,
+            U.email,
+            U.eco_points,
+            U.co2_saved,
+            U.UnitManagement,
+            NE.NombreNivel,
+            NE.Id,
+            (NE.PuntosMaximos - U.eco_points) AS PuntosFaltantes,
+            (SELECT NombreNivel
+            FROM NivelesEco
+            WHERE Id = NE.Id + 1) AS SiguienteNivel,
+            CONVERT(
+                DECIMAL(10,2),
+                (
+                    CONVERT(
+                        DECIMAL(10,2),
+                        (U.eco_points - NE.PuntosMinimos)
+                    )
+                    /
+                    CONVERT(
+                        DECIMAL(10,2),
+                        (NE.PuntosMaximos - NE.PuntosMinimos)
+                    )
+                ) * 100
+            ) AS Progreso
+        FROM users U
+        LEFT JOIN NivelesEco NE
+            ON U.eco_points BETWEEN NE.PuntosMinimos
+            AND NE.PuntosMaximos
+        WHERE U.id = @1
       """,
       [id]
     )
@@ -381,7 +396,11 @@ defmodule EcorecycleApiWeb.RecyclingController do
 
         level:
           Enum.at(row, 5) || "Semilla",
-          idlevel: Enum.at(row, 6)
+          idlevel: Enum.at(row, 6),
+
+          puntosfaltantes: Enum.at(row,7 ),
+          siguientenivel: Enum.at(row,8 ),
+          progreso: Enum.at(row,9 )
       }
     })
 
