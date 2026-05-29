@@ -961,7 +961,340 @@ def guardar_token(conn, params) do
   })
 end
 
+# =========================================================
+# HISTORIAL ECOBENEFICIOS
+# =========================================================
 
+def historial_ecobeneficios(conn, %{"user_id" => user_id}) do
 
+  {:ok, result} =
+    Repo.query(
+      """
+      SELECT
+          EC.CodigoCanje,
+
+          I.nombre AS Beneficio,
+
+          EC.EcoPuntosUsados,
+
+          FORMAT(
+              EC.FechaCanje,
+              'yyyy/MM/dd - HH:mm'
+          ) AS FechaCanje,
+
+          EC.Estado
+
+      FROM Canje EC
+
+      INNER JOIN Incentivo I
+          ON I.id = EC.IncentivoId
+
+      WHERE EC.UsuarioId = @1
+
+      ORDER BY EC.FechaCanje DESC
+      """,
+      [user_id]
+    )
+
+  historial =
+  Enum.map(result.rows, fn row ->
+    %{
+      codigo:
+        Enum.at(row, 0)
+        |> :unicode.characters_to_binary(:latin1, :utf8),
+
+      beneficio:
+        Enum.at(row, 1)
+        |> :unicode.characters_to_binary(:latin1, :utf8),
+
+      ecopuntos: Enum.at(row, 2),
+
+      fecha:
+        Enum.at(row, 3)
+        |> :unicode.characters_to_binary(:latin1, :utf8),
+
+      estado:
+        Enum.at(row, 4)
+        |> :unicode.characters_to_binary(:latin1, :utf8)
+    }
+  end)
+
+  # ==========================================
+  # RESUMEN
+  # ==========================================
+
+  {:ok, resumenQuery} =
+    Repo.query(
+      """
+      SELECT
+
+          COUNT(*) AS TotalCanjes,
+
+          SUM(
+              ISNULL(EcoPuntosUsados,0)
+          ) AS TotalEcoPuntos,
+
+          SUM(
+              CASE
+                  WHEN Estado = 'realizado'
+                  THEN 1
+                  ELSE 0
+              END
+          ) AS BeneficiosActivos
+
+      FROM Canje
+
+      WHERE UsuarioId = @1
+      """,
+      [user_id]
+    )
+
+  resumenRow =
+    List.first(resumenQuery.rows)
+
+  resumen = %{
+    total_beneficios:
+      Enum.at(resumenRow, 0) || 0,
+
+    total_ecopuntos:
+      Enum.at(resumenRow, 1) || 0,
+
+    beneficios_activos:
+      Enum.at(resumenRow, 2) || 0
+  }
+
+  json(conn, %{
+    success: true,
+    historial: historial,
+    resumen: resumen
+  })
+end
+
+# =========================================================
+# LISTAR CAMPAÑAS
+# =========================================================
+
+def listar_campanias(conn, _params) do
+
+# ============================================
+# FINALIZAR CAMPAÑAS VENCIDAS
+# ============================================
+
+Repo.query!(
+  """
+  UPDATE campanias
+  SET Estado = 'finalizado'
+  WHERE
+      Estado = 'activa'
+      AND FechaFin < CAST(GETDATE() AS DATE)
+  """
+)
+
+  {:ok, result} =
+    Repo.query(
+      """
+      SELECT
+
+          C.IdCampania,
+
+          C.NombreCampania,
+
+          C.Incentivo,
+
+          FORMAT(
+              C.FechaInicio,
+              'yyyy/MM/dd'
+          ) AS FechaInicio,
+
+          FORMAT(
+              C.FechaFin,
+              'yyyy/MM/dd'
+          ) AS FechaFin,
+
+          C.MaterialObjetivo,
+
+          C.Estado,
+
+          (
+            SELECT COUNT(*)
+            FROM SolicitudReciclaje SR
+            INNER JOIN SolicitudReciclajeDetalle SRD
+              ON SRD.SolicitudId = SR.Id
+
+            WHERE
+                SR.Estado = 'aprobado'
+                AND SRD.TipoReciclaje = C.MaterialObjetivo
+                AND CAST(SR.FechaRegistro AS DATE)
+                  BETWEEN C.FechaInicio
+                  AND C.FechaFin
+          ) AS Entregas,
+
+          (
+            SELECT
+                ISNULL(SUM(SRD.Puntos),0)
+
+            FROM SolicitudReciclaje SR
+            INNER JOIN SolicitudReciclajeDetalle SRD
+              ON SRD.SolicitudId = SR.Id
+
+            WHERE
+                SR.Estado = 'aprobado'
+                AND SRD.TipoReciclaje = C.MaterialObjetivo
+                AND CAST(SR.FechaRegistro AS DATE)
+                  BETWEEN C.FechaInicio
+                  AND C.FechaFin
+          ) AS EcoPuntos
+
+      FROM Campanias C
+
+      ORDER BY C.IdCampania DESC
+      """
+    )
+
+  campañas =
+    Enum.map(result.rows, fn row ->
+
+      %{
+        id: Enum.at(row, 0),
+
+        nombre: Enum.at(row, 1),
+
+        descripcion: Enum.at(row, 2),
+
+        fecha_inicio: Enum.at(row, 3),
+
+        fecha_fin: Enum.at(row, 4),
+
+        material: Enum.at(row, 5),
+
+        estado: Enum.at(row, 6),
+
+        entregas: Enum.at(row, 7),
+
+        ecopuntos: Enum.at(row, 8)
+      }
+
+    end)
+
+  json(conn, campañas)
+end
+
+# =========================================================
+# CREAR CAMPAÑA
+# =========================================================
+
+def crear_campania(conn, params) do
+
+  Repo.query!(
+    """
+    INSERT INTO Campanias
+    (
+      NombreCampania,
+      Incentivo,
+      FechaInicio,
+      FechaFin,
+      MaterialObjetivo,
+      Estado
+    )
+    VALUES
+    (
+      @1,
+      @2,
+      @3,
+      @4,
+      @5,
+      'activo'
+    )
+    """,
+    [
+      params["nombre"],
+      params["descripcion"],
+      params["fecha_inicio"],
+      params["fecha_fin"],
+      params["material"]
+    ]
+  )
+
+  json(conn, %{
+    success: true
+  })
+end
+
+# =========================================================
+# EDITAR CAMPAÑA
+# =========================================================
+
+def editar_campania(conn, %{"id" => id} = params) do
+
+  Repo.query!(
+    """
+    UPDATE Campanias
+    SET
+
+      NombreCampania = @1,
+
+      Incentivo = @2,
+
+      FechaInicio = @3,
+
+      FechaFin = @4,
+
+      MaterialObjetivo = @5
+
+    WHERE IdCampania = @6
+    """,
+    [
+      params["nombre"],
+      params["descripcion"],
+      params["fecha_inicio"],
+      params["fecha_fin"],
+      params["material"],
+      id
+    ]
+  )
+
+  json(conn, %{
+    success: true
+  })
+end
+
+# =========================================================
+# ELIMINAR CAMPAÑA
+# =========================================================
+
+def eliminar_campania(conn, %{"id" => id}) do
+
+  Repo.query!(
+    """
+    DELETE FROM Campanias
+    WHERE IdCampania = @1
+    """,
+    [id]
+  )
+
+  json(conn, %{
+    success: true
+  })
+end
+
+# =========================================================
+# DESACTIVAR CAMPAÑA
+# =========================================================
+
+def desactivar_campania(conn, %{"id" => id}) do
+
+  Repo.query!(
+    """
+    UPDATE Campanias
+    SET Estado = 'desactivado'
+    WHERE IdCampania = @1
+    """,
+    [id]
+  )
+
+  json(conn, %{
+    success: true
+  })
+end
 
 end

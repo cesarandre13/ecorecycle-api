@@ -76,7 +76,25 @@ def login(conn, params) do
     U.UnitManagement,
     U.eco_points,
     NE.NombreNivel,
-        NE.Id
+        NE.Id,
+            (NE.PuntosMaximos - U.eco_points) AS PuntosFaltantes,
+            (SELECT NombreNivel
+            FROM NivelesEco
+            WHERE Id = NE.Id + 1) AS SiguienteNivel,
+            CONVERT(
+                DECIMAL(10,2),
+                (
+                    CONVERT(
+                        DECIMAL(10,2),
+                        (U.eco_points - NE.PuntosMinimos)
+                    )
+                    /
+                    CONVERT(
+                        DECIMAL(10,2),
+                        (NE.PuntosMaximos - NE.PuntosMinimos)
+                    )
+                ) 
+            ) AS Progreso
 
   FROM users U
 
@@ -125,7 +143,10 @@ def login(conn, params) do
         eco_points: eco_points,
 
         nivel: nivel,
-        idlevel: Enum.at(row, 7)
+        idlevel: Enum.at(row, 7),
+        puntosfaltantes: Enum.at(row,8 ),
+          siguientenivel: Enum.at(row,9 ),
+          progreso: Enum.at(row,10 )
       }
     })
 

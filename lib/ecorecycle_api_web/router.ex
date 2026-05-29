@@ -73,6 +73,32 @@ get "/admin/ranking_bloques", RecyclingController, :ranking_bloques
 
 post "/guardar-token", RecyclingController, :guardar_token
 
+get "/eco/historial-beneficios", RecyclingController, :historial_ecobeneficios
+
+# ==========================================
+# CAMPAÑAS
+# ==========================================
+
+get "/campanias",
+    RecyclingController,
+    :listar_campanias
+
+post "/campanias",
+    RecyclingController,
+    :crear_campania
+
+put "/campanias/:id",
+    RecyclingController,
+    :editar_campania
+
+delete "/campanias/:id",
+    RecyclingController,
+    :eliminar_campania
+
+put "/campanias/desactivar/:id",
+    RecyclingController,
+    :desactivar_campania
+
 end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
